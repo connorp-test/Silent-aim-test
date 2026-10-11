@@ -84,7 +84,7 @@ if getgenv().toggled and getgenv().old then
         
         local arg = { getgenv().old(...) }
         local success, env = pcall(getfenv, 2)
-        if success scientists and env and env.script then
+        if success and env and env.script then
             local scriptName = tostring(env.script)
             if (scriptName == 'BulletEmitter' or scriptName == 'Taser') and nearestEnemy and nearestEnemy.Character and nearestEnemy.Character:FindFirstChild("HumanoidRootPart") then
                 arg[1] = nearestEnemy.Character.HumanoidRootPart
