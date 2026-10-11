@@ -1,7 +1,13 @@
 getgenv().toggled = true
 
-getgenv().old = getgenv().old
-    or require(game:GetService('ReplicatedStorage').Module.RayCast).RayIgnoreNonCollideWithIgnoreList
+-- Safely cache the original hook function
+if not getgenv().old then
+    local raycastModule = game:GetService('ReplicatedStorage'):FindFirstChild('Module') 
+        and game:GetService('ReplicatedStorage').Module:FindFirstChild('RayCast')
+    if raycastModule then
+        getgenv().old = require(raycastModule).RayIgnoreNonCollideWithIgnoreList
+    end
+end
 
 local fovCircle = Drawing.new("Circle")
 fovCircle.Visible = true
@@ -19,16 +25,20 @@ local camera = game:GetService("Workspace").CurrentCamera
 local player = game:GetService("Players").LocalPlayer
 
 local function isInFOV(targetPos)
-    local playerPos = player.Character and player.Character.HumanoidRootPart.Position
-    if not playerPos then return false end
+    local char = player.Character
+    if not char then return false end
     
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    
+    local playerPos = root.Position
     local directionToTarget = (targetPos - playerPos).Unit
-    local forwardVector = player.Character.HumanoidRootPart.CFrame.LookVector
+    local forwardVector = root.CFrame.LookVector
     local dotProduct = directionToTarget:Dot(forwardVector)
     local fovAngle = math.rad(65 / 2)
-    local distance = (targetPos - playerPos).Magnitude
     local screenPos, onScreen = camera:WorldToViewportPoint(targetPos)
     local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - fovCircle.Position).Magnitude
+    
     return dotProduct > math.cos(fovAngle) and screenDistance <= fovCircle.Radius and onScreen
 end
 
@@ -49,50 +59,47 @@ local function updateSnapline(target)
     end
 end
 
-if getgenv().toggled then
-    require(game:GetService('ReplicatedStorage').Module.RayCast).RayIgnoreNonCollideWithIgnoreList =
-        function(...)
-            local nearestDistance, nearestEnemy = fovCircle.Radius, nil
-            for i, v in pairs(game:GetService('Players'):GetPlayers()) do
-                if
-                    v ~= player
-                    and v.Team ~= player.Team
-                    and v.Character
-                    and v.Character:FindFirstChild('HumanoidRootPart')
-                    and v.Character:FindFirstChild('Humanoid')
-                    and v.Character.Humanoid.Health > 0
-                    and isInFOV(v.Character.HumanoidRootPart.Position)
-                then
-                    local screenPos = camera:WorldToViewportPoint(v.Character.HumanoidRootPart.Position)
-                    local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - fovCircle.Position).Magnitude
-                    if screenDistance < nearestDistance then
-                        nearestDistance, nearestEnemy = screenDistance, v
-                    end
+if getgenv().toggled and getgenv().old then
+    local raycastModule = require(game:GetService('ReplicatedStorage').Module.RayCast)
+    raycastModule.RayIgnoreNonCollideWithIgnoreList = function(...)
+        local nearestDistance, nearestEnemy = fovCircle.Radius, nil
+        for i, v in pairs(game:GetService('Players'):GetPlayers()) do
+            if v ~= player
+                and v.Team ~= player.Team
+                and v.Character
+                and v.Character:FindFirstChild('HumanoidRootPart')
+                and v.Character:FindFirstChild('Humanoid')
+                and v.Character.Humanoid.Health > 0
+                and isInFOV(v.Character.HumanoidRootPart.Position)
+            then
+                local screenPos = camera:WorldToViewportPoint(v.Character.HumanoidRootPart.Position)
+                local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - fovCircle.Position).Magnitude
+                if screenDistance < nearestDistance then
+                    nearestDistance, nearestEnemy = screenDistance, v
                 end
             end
-            
-            updateSnapline(nearestEnemy)
-            
-            local arg = { old(...) }
-            if
-                (
-                    tostring(getfenv(2).script) == 'BulletEmitter'
-                    or tostring(getfenv(2).script) == 'Taser'
-                ) and nearestEnemy
-            then
+        end
+        
+        updateSnapline(nearestEnemy)
+        
+        local arg = { getgenv().old(...) }
+        local success, env = pcall(getfenv, 2)
+        if success scientists and env and env.script then
+            local scriptName = tostring(env.script)
+            if (scriptName == 'BulletEmitter' or scriptName == 'Taser') and nearestEnemy and nearestEnemy.Character and nearestEnemy.Character:FindFirstChild("HumanoidRootPart") then
                 arg[1] = nearestEnemy.Character.HumanoidRootPart
                 arg[2] = nearestEnemy.Character.HumanoidRootPart.Position
             end
-            return unpack(arg)
         end
+        return unpack(arg)
+    end
     
     game:GetService("RunService").RenderStepped:Connect(function()
-        if toggled then
+        if getgenv().toggled then
             local nearestEnemy = nil
             local nearestDistance = fovCircle.Radius
             for i, v in pairs(game:GetService('Players'):GetPlayers()) do
-                if
-                    v ~= player
+                if v ~= player
                     and v.Team ~= player.Team
                     and v.Character
                     and v.Character:FindFirstChild('HumanoidRootPart')
@@ -115,9 +122,11 @@ if getgenv().toggled then
         end
     end)
 else
-    require(game:GetService('ReplicatedStorage').Module.RayCast).RayIgnoreNonCollideWithIgnoreList = getgenv().old
+    if getgenv().old then
+        require(game:GetService('ReplicatedStorage').Module.RayCast).RayIgnoreNonCollideWithIgnoreList = getgenv().old
+    end
     snapline.Visible = false
-    snapline:Remove()
+    pcall(function() snapline:Remove() end)
     fovCircle.Visible = false
-    fovCircle:Remove()
+    pcall(function() fovCircle:Remove() end)
 end
